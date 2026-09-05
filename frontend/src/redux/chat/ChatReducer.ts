@@ -9,6 +9,7 @@ const initialState: ChatReducerState = {
     deletedChat: null,
     editedGroup: null,
     markedAsReadChat: null,
+    chatMembers: null,
 };
 
 const chatReducer = (state: ChatReducerState = initialState, action: Action): ChatReducerState => {
@@ -27,6 +28,8 @@ const chatReducer = (state: ChatReducerState = initialState, action: Action): Ch
             return {...state, editedGroup: action.payload};
         case actionTypes.MARK_CHAT_AS_READ:
             return {...state, markedAsReadChat: action.payload};
+        case actionTypes.GET_CHAT_MEMBERS:
+            return {...state, chatMembers: action.payload};
     }
     return state;
 };

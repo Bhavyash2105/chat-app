@@ -1,11 +1,12 @@
 import {Avatar, Badge} from "@mui/material";
-import React from "react";
+import React, {useEffect, useState} from "react";
 import {getChatName, getInitialsFromName, transformDateToString} from "../utils/Utils";
 import styles from './ChatCard.module.scss';
 import {ChatDTO} from "../../redux/chat/ChatModel";
 import {useSelector} from "react-redux";
 import {RootState} from "../../redux/Store";
 import {MessageDTO} from "../../redux/message/MessageModel";
+import SessionRatchetService from "../../services/SessionRatchetService";
 
 interface ChatCardProps {
     chat: ChatDTO;
@@ -14,12 +15,78 @@ interface ChatCardProps {
 const ChatCard = (props: ChatCardProps) => {
 
     const authState = useSelector((state: RootState) => state.auth);
+    const [decryptedPreview, setDecryptedPreview] = useState<string | null>("...");
 
     const name: string = getChatName(props.chat, authState.reqUser);
     const initials: string = getInitialsFromName(name);
-    const sortedMessages: MessageDTO[] = props.chat.messages.sort((a, b) => +new Date(a.timeStamp) - +new Date(b.timeStamp));
+    const sortedMessages: MessageDTO[] = [...props.chat.messages].sort((a, b) => +new Date(a.timeStamp) - +new Date(b.timeStamp));
     const lastMessage: MessageDTO | undefined = sortedMessages.length > 0 ? sortedMessages[sortedMessages.length - 1] : undefined;
-    const lastMessageContent: string = lastMessage ? lastMessage.content.length > 25 ? lastMessage.content.slice(0, 25) + "..." : lastMessage.content : "";
+
+    useEffect(() => {
+        if (!lastMessage || !authState.reqUser) {
+            setDecryptedPreview(null);
+            return;
+        }
+
+        if (!lastMessage.isEncrypted) {
+            setDecryptedPreview(lastMessage.content ?? "");
+            return;
+        }
+
+        if (!lastMessage.ratchetHeader) {
+            setDecryptedPreview("🔒");
+            return;
+        }
+
+        const isOwnMessage = lastMessage.user.id === authState.reqUser.id;
+        const localPlaintext = (lastMessage as MessageDTO & { __localPlaintext?: string }).__localPlaintext;
+
+        if (isOwnMessage) {
+            if (localPlaintext) {
+                setDecryptedPreview(localPlaintext);
+                return;
+            }
+
+            let cancelled = false;
+            const loadCachedOwnMessage = async () => {
+                try {
+                    const cached = await SessionRatchetService.getCachedOwnMessage(lastMessage.id.toString());
+                    if (!cancelled) {
+                        if (cached) {
+                            setDecryptedPreview(cached);
+                        } else {
+                            setDecryptedPreview("🔒");
+                        }
+                    }
+                } catch {
+                    if (!cancelled) setDecryptedPreview("🔒");
+                }
+            };
+            loadCachedOwnMessage();
+            return () => { cancelled = true; };
+        }
+
+        let cancelled = false;
+        const doDecrypt = async () => {
+            try {
+                const plaintext = await SessionRatchetService.ratchetDecrypt(
+                    lastMessage.ratchetHeader!,
+                    lastMessage.content ?? "",
+                    lastMessage.user.id.toString(),
+                    lastMessage.id.toString()
+                );
+                if (!cancelled) setDecryptedPreview(plaintext);
+            } catch {
+                if (!cancelled) setDecryptedPreview("🔒");
+            }
+        };
+        doDecrypt();
+
+        return () => { cancelled = true; };
+    }, [lastMessage, authState.reqUser]);
+
+    const previewText = decryptedPreview ?? "";
+    const lastMessageContent: string = previewText.length > 25 ? previewText.slice(0, 25) + "..." : previewText;
     const lastMessageName: string = lastMessage ? lastMessage.user.fullName === authState.reqUser?.fullName ? "You" : lastMessage.user.fullName : "";
     const lastMessageString: string = lastMessage ? lastMessageName + ": " + lastMessageContent : "";
     const lastDate: string = lastMessage ? transformDateToString(new Date(lastMessage.timeStamp)) : "";

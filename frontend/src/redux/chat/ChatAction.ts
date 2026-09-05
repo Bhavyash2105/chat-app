@@ -4,7 +4,7 @@ import {UUID} from "node:crypto";
 import {ChatDTO, GroupChatRequestDTO} from "./ChatModel";
 import {AUTHORIZATION_PREFIX} from "../Constants";
 import {AppDispatch} from "../Store";
-import {ApiResponseDTO} from "../auth/AuthModel";
+import {ApiResponseDTO, UserDTO} from "../auth/AuthModel";
 
 const CHAT_PATH = 'api/chats';
 
@@ -133,5 +133,23 @@ export const markChatAsRead = (chatId: UUID, token: string) => async (dispatch: 
         dispatch({type: actionTypes.MARK_CHAT_AS_READ, payload: resData});
     } catch (error: any) {
         console.error('Marking chat as read failed, ', error);
+    }
+};
+
+export const getChatMembers = (chatId: UUID, token: string) => async (dispatch: AppDispatch): Promise<void> => {
+    try {
+        const res: Response = await fetch(`${BASE_API_URL}/${CHAT_PATH}/${chatId}/members`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `${AUTHORIZATION_PREFIX}${token}`,
+            }
+        });
+
+        const resData: UserDTO[] = await res.json();
+        console.log('Fetched chat members: ', resData);
+        dispatch({type: actionTypes.GET_CHAT_MEMBERS, payload: resData});
+    } catch (error: any) {
+        console.error('Fetching chat members failed: ', error);
     }
 };

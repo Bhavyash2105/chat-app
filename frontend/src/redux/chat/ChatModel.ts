@@ -24,4 +24,5 @@ export type ChatReducerState = {
     deletedChat: ApiResponseDTO | null;
     editedGroup: ChatDTO | null;
     markedAsReadChat: ChatDTO | null;
+    chatMembers: UserDTO[] | null;
 }

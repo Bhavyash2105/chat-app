@@ -1,12 +1,12 @@
 import styles from './Homepage.module.scss';
-import React, {useEffect, useState} from "react";
+import React, {useEffect, useRef, useState} from "react";
 import {NavigateFunction, useNavigate} from "react-router-dom";
 import {useDispatch, useSelector} from "react-redux";
 import {AppDispatch, RootState} from "../redux/Store";
-import {TOKEN} from "../config/Config";
+import {BASE_API_URL, TOKEN, WS_BASE_URL} from "../config/Config";
 import EditGroupChat from "./editChat/EditGroupChat";
 import Profile from "./profile/Profile";
-import {Avatar, Divider, IconButton, InputAdornment, Menu, MenuItem, TextField} from "@mui/material";
+import {Alert, Avatar, Divider, IconButton, InputAdornment, Menu, MenuItem, TextField, Button} from "@mui/material";
 import ChatIcon from '@mui/icons-material/Chat';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import {currentUser, logoutUser} from "../redux/auth/AuthAction";
@@ -25,6 +25,7 @@ import {Client, over, Subscription} from "stompjs";
 import {AUTHORIZATION_PREFIX} from "../redux/Constants";
 import CreateGroupChat from "./editChat/CreateGroupChat";
 import CreateSingleChat from "./editChat/CreateSingleChat";
+import SessionRatchetService from "../services/SessionRatchetService";
 
 const Homepage = () => {
 
@@ -49,7 +50,21 @@ const Homepage = () => {
     const [isConnected, setIsConnected] = useState<boolean>(false);
     const [messageReceived, setMessageReceived] = useState<boolean>(false);
     const [subscribeTry, setSubscribeTry] = useState<number>(1);
+const [missingKeysBanner, setMissingKeysBanner] = useState<boolean>(false);
+const onAcceptNewIdentity = async () => {
+        if (!identityChangedUserId || !token) return;
+        try {
+            await SessionRatchetService.acceptNewIdentityAndReset(identityChangedUserId, token);
+            setIdentityChangedUserId(null);
+        } catch (e) {
+            console.error('Failed to accept new identity:', e);
+        }
+    };
     const open = Boolean(anchor);
+    // Holds the per-recipient ciphertext map for the in-flight message so the
+    // WebSocket broadcast effect can deliver each member their own encrypted copy.
+    const pendingPerRecipientContent = useRef<Record<string, { content: string; iv: string; ratchetHeader: string }> | null>(null);
+    const [identityChangedUserId, setIdentityChangedUserId] = useState<string | null>(null);
 
     useEffect(() => {
         if (token && !authState.reqUser) {
@@ -90,17 +105,22 @@ const Homepage = () => {
         setMessages(messageState.messages);
     }, [messageState.messages]);
 
-    useEffect(() => {
-        if (messageState.newMessage && stompClient && currentChat && isConnected) {
-            const webSocketMessage: WebSocketMessageDTO = {...messageState.newMessage, chat: currentChat};
-            stompClient.send("/app/messages", {}, JSON.stringify(webSocketMessage));
-        }
-    }, [messageState.newMessage]);
+useEffect(() => {
+    if (messageState.newMessage && stompClient && currentChat && isConnected) {
+        const { __localPlaintext, ...wireMessage } = messageState.newMessage as any;
+        const webSocketPayload = {
+            message: {...wireMessage, chat: currentChat},
+            perRecipientContent: pendingPerRecipientContent.current,
+        };
+        stompClient.send("/app/messages", {}, JSON.stringify(webSocketPayload));
+        pendingPerRecipientContent.current = null;
+    }
+}, [messageState.newMessage]);
 
     useEffect(() => {
         console.log("Attempting to subscribe to ws: ", subscribeTry);
         if (isConnected && stompClient && stompClient.connected && authState.reqUser?.id) {
-            const subscription: Subscription = stompClient.subscribe("/topic/" + authState.reqUser.id.toString(), onMessageReceive);
+const subscription: Subscription = stompClient.subscribe("/topic/" + authState.reqUser.id.toString(), (frame) => onMessageReceive(frame));
 
             return () => subscription.unsubscribe();
         } else {
@@ -124,12 +144,12 @@ const Homepage = () => {
         connect();
     }, []);
 
-    const connect = () => {
+const connect = () => {
         const headers = {
             Authorization: `${AUTHORIZATION_PREFIX}${token}`
         };
 
-        const socket: WebSocket = new SockJS("http://localhost:8080/ws");
+const socket: WebSocket = new SockJS(`${WS_BASE_URL}/ws`);
         const client: Client = over(socket);
         client.connect(headers, onConnect, onError);
         setStompClient(client);
@@ -143,14 +163,110 @@ const Homepage = () => {
         console.error("WebSocket connection error", error);
     };
 
-    const onMessageReceive = () => {
+const onMessageReceive = (frame?: any) => {
+        // The server delivers each recipient their OWN ciphertext (merged into the
+        // message payload). Parse it and append it to the local message list so the
+        // recipient can decrypt it.
+        if (frame && frame.body) {
+            try {
+                const incoming = JSON.parse(frame.body);
+                console.log('[onMessageReceive] WS frame received', {
+                    hasId: !!incoming?.id,
+                    id: incoming?.id,
+                    contentLen: (incoming?.content || '').length,
+                    headerLen: (incoming?.ratchetHeader || '').length,
+                    isEncrypted: incoming?.isEncrypted,
+                    encryptionFormat: incoming?.encryptionFormat,
+                    senderId: incoming?.user?.id,
+                    myUserId: authState.reqUser?.id,
+                    isOwnDelivery: incoming?.user?.id === authState.reqUser?.id,
+                });
+                if (incoming && incoming.id) {
+                    dispatch({type: "RECEIVE_WEBSOCKET_MESSAGE", payload: incoming});
+                }
+            } catch (e) {
+                console.error('[onMessageReceive] Failed to parse WebSocket message', e);
+            }
+        }
         setMessageReceived(true);
     };
 
-    const onSendMessage = () => {
-        if (currentChat?.id && token) {
-            dispatch(createMessage({chatId: currentChat.id, content: newMessage}, token));
+    /**
+     * Send a message with forward secrecy using Double Ratchet.
+     */
+const onSendMessage = async () => {
+        if (!currentChat?.id || !token || !authState.reqUser || !newMessage.trim()) return;
+
+        console.log('[onSendMessage] Sending message:', {
+            chatId: currentChat.id,
+            textLen: newMessage.trim().length,
+            members: currentChat.users.map(u => u.id),
+        });
+        try {
+            const plaintext = newMessage.trim();
+            const tempMessageId = `temp-${
+                typeof globalThis.crypto.randomUUID === 'function'
+                    ? globalThis.crypto.randomUUID()
+                    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+            }`;
+            await SessionRatchetService.cacheOwnSentMessage(tempMessageId, plaintext);
+            // Only encrypt for actual chat members; the sender never creates a
+            // self-session, and the plaintext is cached locally for instant rendering.
+            const memberIds: string[] = currentChat.users
+                .map(u => u.id.toString())
+                .filter(id => id !== authState.reqUser!.id.toString());
+            const targetIds = memberIds;
+            const ratchetResults = await Promise.all(
+                targetIds.map(async (recipientId) => {
+                    const result = await SessionRatchetService.ratchetEncrypt(
+                        plaintext,
+                        recipientId,
+                        token
+                    );
+                    return { recipientId, result };
+                })
+            );
+            console.log('[onSendMessage] Encrypted for targets:', ratchetResults.map(r => ({
+                recipientId: r.recipientId,
+                ciphertextLen: r.result.ciphertext.length,
+                ivLen: r.result.iv.length,
+                headerLen: r.result.ratchetHeader.length,
+            })));
+
+const ratchetHeaders: Record<string, string> = {};
+            const perRecipientContent: Record<string, { content: string; iv: string; ratchetHeader: string }> = {};
+            for (const { recipientId, result } of ratchetResults) {
+                ratchetHeaders[recipientId] = result.ratchetHeader;
+                perRecipientContent[recipientId] = {
+                    content: result.ciphertext,
+                    iv: result.iv,
+                    ratchetHeader: result.ratchetHeader,
+                };
+            }
+            // Hold the per-recipient ciphertext map so the WebSocket broadcast effect
+            // can deliver each member their own encrypted copy.
+            pendingPerRecipientContent.current = perRecipientContent;
+
+            const payload = {
+                chatId: currentChat.id,
+                content: null,
+                ratchetHeader: JSON.stringify(ratchetHeaders),
+                encryptionFormat: 'ratchet',
+            };
+            console.log('[onSendMessage] Dispatching createMessage. headerHasNul=' + (payload.ratchetHeader.indexOf('\u0000') >= 0));
+            console.log('[onSendMessage] payload.ratchetHeaders keys=', Object.keys(ratchetHeaders));
+            dispatch(createMessage(payload, token, plaintext, tempMessageId));
+
             setNewMessage("");
+        } catch (error) {
+            const { IdentityChangedError } = await import('../services/SessionRatchetService');
+            if (error instanceof IdentityChangedError) {
+                setIdentityChangedUserId(error.theirUserId);
+                return;
+            }
+            setMissingKeysBanner(true);
+            setTimeout(() => setMissingKeysBanner(false), 5000);
+            console.error('[onSendMessage] Failed to encrypt and send message:', error);
         }
     };
 
@@ -303,6 +419,20 @@ const Homepage = () => {
                             </div>}
                     </div>
                     <div className={styles.messagesContainer}>
+                        {missingKeysBanner && (
+                            <Alert severity="warning" sx={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000 }}>
+                                One or more chat members are missing a ratchet pre-key bundle. Message cannot be encrypted and sent until all members have uploaded one.
+                            </Alert>
+                        )}
+                        {identityChangedUserId && (
+                            <Alert
+                                severity="warning"
+                                sx={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1000 }}
+                                action={<Button color="inherit" size="small" onClick={onAcceptNewIdentity}>Trust new key</Button>}
+                            >
+                                This contact's security code changed (they may have reset their device). Tap "Trust new key" to keep messaging them.
+                            </Alert>
+                        )}
                         {!currentChat && <WelcomePage reqUser={authState.reqUser}/>}
                         {currentChat && <MessagePage
                             chat={currentChat}
