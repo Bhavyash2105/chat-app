@@ -10,11 +10,29 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
-    @Override
+@Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
-                .setAllowedOrigins("http://localhost:3000")
+                .setAllowedOriginPatterns(allowedOrigins())
                 .withSockJS();
+    }
+
+    /**
+     * Read the allowed WebSocket origins from the {@code CORS_ALLOWED_ORIGINS} environment
+     * variable (comma-separated). Defaults to the local dev origin.
+     *
+     * In production, set this to exactly your frontend domain(s), e.g.:
+     * {@code CORS_ALLOWED_ORIGINS=https://your-app.vercel.app,http://localhost:3000}
+     */
+    private static String[] allowedOrigins() {
+        String env = System.getenv("CORS_ALLOWED_ORIGINS");
+        if (env != null && !env.isBlank()) {
+            return java.util.Arrays.stream(env.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .toArray(String[]::new);
+        }
+        return new String[]{"http://localhost:3000"};
     }
 
     @Override

@@ -7,6 +7,7 @@ import com.nicolas.chatapp.model.Chat;
 import com.nicolas.chatapp.model.User;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public interface ChatService {
@@ -29,4 +30,5 @@ public interface ChatService {
 
     Chat markAsRead(UUID chatId, User reqUser) throws ChatException, UserException;
 
+    Set<User> getChatMembers(UUID chatId) throws ChatException;
 }

@@ -7,16 +7,23 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 @Builder
-public record MessageDTO(UUID id, String content, LocalDateTime timeStamp, UserDTO user, Set<UUID> readBy) {
+public record MessageDTO(UUID id, String content, LocalDateTime timeStamp, UserDTO user, Set<UUID> readBy,
+                          String iv, boolean isEncrypted,
+                          String ratchetHeader, String encryptionFormat) {
 
     public static MessageDTO fromMessage(Message message) {
         if (Objects.isNull(message)) return null;
+
         return MessageDTO.builder()
                 .id(message.getId())
                 .content(message.getContent())
                 .timeStamp(message.getTimeStamp())
                 .user(UserDTO.fromUser(message.getUser()))
                 .readBy(new HashSet<>(message.getReadBy()))
+                .iv(message.getIv())
+                .isEncrypted(message.isEncrypted())
+                .ratchetHeader(message.getRatchetHeader())
+                .encryptionFormat(message.getEncryptionFormat())
                 .build();
     }
 

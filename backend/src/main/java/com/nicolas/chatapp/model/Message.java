@@ -35,6 +35,25 @@ public class Message {
     @ElementCollection
     private Set<UUID> readBy = new HashSet<>();
 
+    private String iv;
+
+    /**
+     * JSON-encoded ratchet header for Double Ratchet messages.
+     * Present when encryptionFormat is "ratchet".
+     */
+    @Column(columnDefinition = "TEXT")
+    private String ratchetHeader;
+
+    /**
+     * Encryption format identifier.
+     * Only "ratchet" is used for new messages.
+     */
+    private String encryptionFormat;
+
+    @Builder.Default
+    @Column(nullable = false)
+    private boolean isEncrypted = false;
+
     @Override
     public boolean equals(Object obj) {
         if (this == obj) {

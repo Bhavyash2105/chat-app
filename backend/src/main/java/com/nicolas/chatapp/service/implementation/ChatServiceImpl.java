@@ -154,6 +154,12 @@ public class ChatServiceImpl implements ChatService {
     }
 
     @Override
+    public Set<User> getChatMembers(UUID chatId) throws ChatException {
+        Chat chat = findChatById(chatId);
+        return chat.getUsers();
+    }
+
+    @Override
     public Chat markAsRead(UUID chatId, User reqUser) throws ChatException, UserException {
 
         Chat chat = findChatById(chatId);
