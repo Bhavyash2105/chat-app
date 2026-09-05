@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.UuidGenerator;
 
+import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -25,6 +26,12 @@ public class User {
 
     private String password;
     private String fullName;
+
+    @Builder.Default
+    @Column(columnDefinition = "INTEGER DEFAULT 0", nullable = false)
+    private int failedLoginAttempts = 0;
+
+    private LocalDateTime lockoutTime;
 
     @Override
     public boolean equals(Object obj) {

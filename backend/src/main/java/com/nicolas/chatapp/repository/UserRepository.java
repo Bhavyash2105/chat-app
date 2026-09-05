@@ -15,6 +15,7 @@ import java.util.UUID;
 public interface UserRepository extends JpaRepository<User, UUID> {
 
     Optional<User> findByEmail(String email);
+    Optional<User> findByEmailIgnoreCase(String email);
 
     @Query("SELECT u FROM APP_USER u WHERE u.fullName LIKE %:fullName%")
     List<User> findByFullName(@Param("fullName") String fullName);

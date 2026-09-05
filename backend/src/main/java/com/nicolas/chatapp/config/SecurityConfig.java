@@ -36,16 +36,34 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthorizationFilter, BasicAuthenticationFilter.class)
                 .cors(cors -> cors.configurationSource(request -> {
                     CorsConfiguration cfg = new CorsConfiguration();
-                    cfg.setAllowedOrigins(List.of("http://localhost:3000"));
+                    cfg.setAllowedOrigins(allowedOrigins());
                     cfg.setAllowedMethods(Collections.singletonList("*"));
                     cfg.setAllowCredentials(true);
                     cfg.setAllowedHeaders(Collections.singletonList("*"));
-                    cfg.setExposedHeaders(List.of(JwtConstants.TOKEN_HEADER));
+                    cfg.setExposedHeaders(List.of(JwtConstants.TOKEN_HEADER, "Set-Cookie"));
                     cfg.setMaxAge(3600L);
                     return cfg;
                 }))
                 .csrf(AbstractHttpConfigurer::disable)
                 .build();
+    }
+
+    /**
+     * Read the allowed CORS origins from the {@code CORS_ALLOWED_ORIGINS} environment
+     * variable (comma-separated). Defaults to the local dev origin.
+     *
+     * In production, set this to exactly your frontend domain(s), e.g.:
+     * {@code CORS_ALLOWED_ORIGINS=https://your-app.vercel.app,https://localhost:3000}
+     */
+    private static List<String> allowedOrigins() {
+        String env = System.getenv("CORS_ALLOWED_ORIGINS");
+        if (env != null && !env.isBlank()) {
+            return java.util.Arrays.stream(env.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .toList();
+        }
+        return List.of("http://localhost:3000");
     }
 
     @Bean

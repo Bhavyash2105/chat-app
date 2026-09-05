@@ -46,6 +46,8 @@ public class JwtAuthorizationFilter extends OncePerRequestFilter {
             List<GrantedAuthority> auths = AuthorityUtils.commaSeparatedStringToAuthorityList(authorities);
             Authentication authentication = new UsernamePasswordAuthenticationToken(email, null, auths);
             SecurityContextHolder.getContext().setAuthentication(authentication);
+
+            filterChain.doFilter(request, response);
         } catch (Exception e) {
             Map<String, Object> errorDetails = new HashMap<>();
             errorDetails.put("message", "Authentication Error");
@@ -53,9 +55,9 @@ public class JwtAuthorizationFilter extends OncePerRequestFilter {
             response.setStatus(HttpStatus.FORBIDDEN.value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             objectMapper.writeValue(response.getWriter(), errorDetails);
+            // CRITICAL FIX: Return immediately to prevent unauthenticated requests from reaching controllers
+            return;
         }
-
-        filterChain.doFilter(request, response);
     }
 
 }
