@@ -14,8 +14,9 @@ export interface UpdateUserRequestDTO {
 }
 
 export interface LoginResponseDTO {
-    token: string,
+    token: string | null,
     isAuthenticated: boolean,
+    lockoutTimeRemainingMinutes?: number | null,
 }
 
 export interface LoginRequestDTO {
@@ -39,9 +40,25 @@ export interface ApiResponseDTO {
     status: boolean,
 }
 
+export interface PasswordChangeRequestDTO {
+    oldPassword: string;
+    newPassword: string;
+}
+
 export interface VerifyOtpRequestDTO {
     email: string,
     otpCode: string,
+}
+
+export interface PasswordResetOtpRequestDTO {
+    email: string,
+    captchaToken: string,
+}
+
+export interface ResetPasswordWithOtpRequestDTO {
+    email: string,
+    otpCode: string,
+    newPassword: string,
 }
 
 export type AuthReducerState = {
@@ -49,7 +66,10 @@ export type AuthReducerState = {
     signup: ApiResponseDTO | null,
     reqUser: UserDTO | null,
     searchUser: UserDTO[] | null,
-    updateUser: ApiResponseDTO | null,
+updateUser: ApiResponseDTO | null,
+    passwordChanged: ApiResponseDTO | null,
     pendingEmail: string | null,
     otpVerification: LoginResponseDTO | null,
+    passwordResetOtpRequest: ApiResponseDTO | null,
+    passwordReset: LoginResponseDTO | null,
 }

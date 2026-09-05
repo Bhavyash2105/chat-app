@@ -2,6 +2,9 @@ import {
     ApiResponseDTO, AuthenticationErrorDTO,
     LoginRequestDTO,
     LoginResponseDTO,
+    PasswordChangeRequestDTO,
+    PasswordResetOtpRequestDTO,
+    ResetPasswordWithOtpRequestDTO,
     SignUpRequestDTO,
     UpdateUserRequestDTO,
     UserDTO,
@@ -11,6 +14,7 @@ import * as actionTypes from './AuthActionType';
 import {BASE_API_URL, TOKEN} from "../../config/Config";
 import {AUTHORIZATION_PREFIX} from "../Constants";
 import {AppDispatch} from "../Store";
+import Logger from "../../services/Logger";
 
 const AUTH_PATH = 'auth';
 const USER_PATH = 'api/users';
@@ -25,11 +29,11 @@ export const register = (data: SignUpRequestDTO) => async (dispatch: AppDispatch
             body: JSON.stringify(data),
         });
 
-        const resData: ApiResponseDTO = await res.json();
-        console.log('Signup OTP requested: ', resData);
+const resData: ApiResponseDTO = await res.json();
+        Logger.info('Signup OTP requested', resData);
         dispatch({type: actionTypes.REGISTER, payload: resData});
     } catch (error: any) {
-        console.error('Register failed: ', error);
+        Logger.error('Register failed', error);
     }
 };
 
@@ -43,15 +47,14 @@ export const verifyOtp = (data: VerifyOtpRequestDTO) => async (dispatch: AppDisp
             body: JSON.stringify(data),
         });
 
-        const resData: LoginResponseDTO = await res.json();
+const resData: LoginResponseDTO = await res.json();
         if (resData.token) {
             localStorage.setItem(TOKEN, resData.token);
-            console.log('Stored token');
         }
-        console.log('OTP verified, user created: ', resData);
+        Logger.info('OTP verified, user created', resData);
         dispatch({type: actionTypes.VERIFY_OTP, payload: resData});
     } catch (error: any) {
-        console.error('OTP verification failed: ', error);
+        Logger.error('OTP verification failed', error);
     }
 };
 
@@ -68,13 +71,51 @@ export const loginUser = (data: LoginRequestDTO) => async (dispatch: AppDispatch
         const resData: LoginResponseDTO = await res.json();
         if (resData.token) {
             localStorage.setItem(TOKEN, resData.token);
-            console.log('Stored token');
         }
-        console.log('User logged in: ', resData);
+        Logger.info('User logged in', { hasToken: !!resData.token, isAuthenticated: resData.isAuthenticated });
         dispatch({type: actionTypes.LOGIN_USER, payload: resData});
     } catch (error: any) {
-        console.error('Login failed: ', error);
+        Logger.error('Login failed', error);
     }
+};
+
+export const requestPasswordResetOtp = (data: PasswordResetOtpRequestDTO) => async (dispatch: AppDispatch): Promise<ApiResponseDTO> => {
+    const res: Response = await fetch(`${BASE_API_URL}/${AUTH_PATH}/forgot-password/request-otp`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+    });
+
+    const resData: ApiResponseDTO = await res.json();
+    if (!res.ok) {
+        throw new Error((resData as any).message || "Unable to request a reset code.");
+    }
+    Logger.info('Password reset OTP requested', { email: data.email });
+    dispatch({type: actionTypes.REQUEST_PASSWORD_RESET_OTP, payload: resData});
+    return resData;
+};
+
+export const resetPasswordWithOtp = (data: ResetPasswordWithOtpRequestDTO) => async (dispatch: AppDispatch): Promise<LoginResponseDTO> => {
+    const res: Response = await fetch(`${BASE_API_URL}/${AUTH_PATH}/forgot-password/verify-otp`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+    });
+
+    const resData: LoginResponseDTO = await res.json();
+    if (!res.ok) {
+        throw new Error((resData as any).message || "Password reset failed.");
+    }
+    if (resData.token) {
+        localStorage.setItem(TOKEN, resData.token);
+    }
+    Logger.info('Password reset OTP verified', { hasToken: !!resData.token, isAuthenticated: resData.isAuthenticated });
+    dispatch({type: actionTypes.RESET_PASSWORD_WITH_OTP, payload: resData});
+    return resData;
 };
 
 export const currentUser = (token: string) => async (dispatch: AppDispatch): Promise<void> => {
@@ -90,13 +131,13 @@ export const currentUser = (token: string) => async (dispatch: AppDispatch): Pro
         const resData: UserDTO | AuthenticationErrorDTO = await res.json();
         if ('message' in resData && resData.message === 'Authentication Error') {
             localStorage.removeItem(TOKEN);
-            console.log('Removed invalid token from local storage');
+            Logger.info('Removed invalid token from local storage');
             return;
         }
-        console.log('Fetched current user: ', resData);
+        Logger.info('Fetched current user', { userId: (resData as UserDTO).id });
         dispatch({type: actionTypes.REQ_USER, payload: resData});
     } catch (error: any) {
-        console.error('Fetching current user failed: ', error);
+        Logger.error('Fetching current user failed', error);
     }
 };
 
@@ -111,10 +152,10 @@ export const searchUser = (data: string, token: string) => async (dispatch: AppD
         });
 
         const resData: UserDTO[] = await res.json();
-        console.log('Searched user data: ', resData);
+        Logger.info('Searched user data', { count: resData.length });
         dispatch({type: actionTypes.SEARCH_USER, payload: resData});
     } catch (error: any) {
-        console.error('Searching user failed: ', error);
+        Logger.error('Searching user failed', error);
     }
 };
 
@@ -130,10 +171,29 @@ export const updateUser = (data: UpdateUserRequestDTO, token: string) => async (
         });
 
         const resData: ApiResponseDTO = await res.json();
-        console.log('User updated: ', resData);
+        Logger.info('User updated', { fullName: data.fullName });
         dispatch({type: actionTypes.UPDATE_USER, payload: resData});
     } catch (error: any) {
-        console.error('User update failed: ', error);
+        Logger.error('User update failed', error);
+    }
+};
+
+export const changePassword = (data: PasswordChangeRequestDTO, token: string) => async (dispatch: AppDispatch): Promise<void> => {
+    try {
+        const res = await fetch(`${BASE_API_URL}/${AUTH_PATH}/password`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `${AUTHORIZATION_PREFIX}${token}`,
+            },
+            body: JSON.stringify(data),
+        });
+
+        const resData: ApiResponseDTO = await res.json();
+        Logger.info('Password changed');
+        dispatch({type: actionTypes.CHANGE_PASSWORD, payload: resData});
+    } catch (error: any) {
+        Logger.error('Password change failed', error);
     }
 };
 
@@ -141,5 +201,6 @@ export const logoutUser = () => async (dispatch: AppDispatch): Promise<void> => 
     localStorage.removeItem(TOKEN);
     dispatch({type: actionTypes.LOGOUT_USER, payload: null});
     dispatch({type: actionTypes.REQ_USER, payload: null});
-    console.log('User logged out');
+    Logger.info('User logged out');
 };
+

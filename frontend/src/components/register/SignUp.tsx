@@ -1,21 +1,32 @@
 import styles from './Register.module.scss'
 import {useNavigate} from "react-router-dom";
 import React, {Dispatch, useEffect, useRef, useState} from "react";
-import {useDispatch, useSelector} from "react-redux";
-import {TOKEN} from "../../config/Config";
-import {RootState} from "../../redux/Store";
-import {AuthReducerState, SignUpRequestDTO} from "../../redux/auth/AuthModel";
-import {currentUser, register} from "../../redux/auth/AuthAction";
+import {useDispatch} from "react-redux";
+import {SignUpRequestDTO} from "../../redux/auth/AuthModel";
+import {register} from "../../redux/auth/AuthAction";
 import {Button, TextField} from "@mui/material";
-const RECAPTCHA_SITE_KEY = "6LcOcGEtAAAAAF2O7mkInmPfqlrzkilME3GJP1jM"; // from Google reCAPTCHA admin console
+// Site key is read from the build-time env var (REACT_APP_RECAPTCHA_SITE_KEY),
+// falling back to Google's public test key for local development.
+import {RECAPTCHA_SITE_KEY} from "../../config/Config";
 
+declare global {
+    interface Window {
+        grecaptcha: any;
+    }
+}
 
 // TODO: Verify email
 // TODO: Check if account already exists
 // TODO: Show error if something went wrong
 const SignUp = () => {
+
     const recaptchaRef = useRef<HTMLDivElement>(null);
     const widgetIdRef = useRef<number | null>(null);
+    // Timestamp (ms) of when the captcha was last solved. reCAPTCHA v2 tokens
+    // expire after ~120s; if the user solves it and then takes too long to submit,
+    // the backend rejects the token with "timeout-or-duplicate".
+    const captchaSolvedAtRef = useRef<number>(0);
+
     const [createAccountData, setCreateAccountData] = useState<SignUpRequestDTO>({
         fullName: "",
         email: "",
@@ -24,20 +35,6 @@ const SignUp = () => {
     });
     const navigate = useNavigate();
     const dispatch: Dispatch<any> = useDispatch();
-    const token: string | null = localStorage.getItem(TOKEN);
-    const state: AuthReducerState = useSelector((state: RootState) => state.auth);
-
-    useEffect(() => {
-        if (token && !state.reqUser) {
-            dispatch(currentUser(token));
-        }
-    }, [token, state.reqUser, dispatch]);
-
-    useEffect(() => {
-        if (state.reqUser) {
-            navigate("/");
-        }
-    }, [state, navigate]);
 
     useEffect(() => {
         const renderCaptcha = () => {
@@ -46,6 +43,7 @@ const SignUp = () => {
                 // @ts-ignore
                 widgetIdRef.current = window.grecaptcha.render(recaptchaRef.current, {
                     sitekey: RECAPTCHA_SITE_KEY,
+                    callback: () => { captchaSolvedAtRef.current = Date.now(); },
                 });
             }
         };
@@ -67,17 +65,36 @@ const SignUp = () => {
 
     const onSubmit = async (e: React.ChangeEvent<HTMLFormElement>) => {
         e.preventDefault();
+        const normalizedEmail = createAccountData.email.trim().toLowerCase();
 
         // @ts-ignore - grecaptcha is loaded globally via the script tag
-        const captchaToken = window.grecaptcha?.getResponse(widgetIdRef.current);
+        let captchaToken = window.grecaptcha?.getResponse(widgetIdRef.current);
+
+        // If the solved captcha is older than ~90s, its token is about to expire.
+        // Reset the widget and ask the user to solve the fresh challenge.
+        if (captchaToken && widgetIdRef.current !== null &&
+            Date.now() - captchaSolvedAtRef.current > 90000) {
+            // @ts-ignore
+            window.grecaptcha?.reset(widgetIdRef.current);
+            captchaToken = "";
+            alert("The captcha expired. Please complete the new captcha and try again.");
+            return;
+        }
 
         if (!captchaToken) {
             alert("Please complete the captcha before signing up.");
             return;
         }
 
-        await dispatch(register({...createAccountData, captchaToken}));
-        navigate("/verify-otp", {state: {email: createAccountData.email}});
+        await dispatch(register({...createAccountData, email: normalizedEmail, captchaToken}));
+        // Pass password via route state instead of window.__signupPassword
+        // This avoids exposing the plaintext password on the global window object
+        navigate("/verify-otp", {
+            state: {
+                email: normalizedEmail,
+                password: createAccountData.password,
+            }
+        });
     };
 
     const onChangeFullName = (e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => {
