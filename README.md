@@ -3,8 +3,6 @@
 Welcome to my Chat Application! This project is a full-fledged realtime messaging application with a user interface 
 inspired by WhatsApp. It enables users to exchange messages individually or within groups.
 
-![image Screenshot](./images/homepage.png)
-
 ## Features
 
 - **Realtime Messaging:** Experience seamless, real-time messaging with instant message delivery.
@@ -64,32 +62,6 @@ Ensure you have **npm** and **mvn** installed on your machine.
      - email: luke.skywalker@test.com
      - password: luke
    - Or you can create your own Accounts and start chatting!
-
-## Images
-
-View your chats with other users:
-![image Screenshot](./images/homepage.png)
-
-Send messages to other users:
-![image Screenshot](./images/send_messages.png)
-
-Log into your account:
-![image Screenshot](./images/signin.png)
-
-Create a new account:
-![image Screenshot](./images/signup.png)
-
-Start a new chat:
-![image Screenshot](./images/start_new_group_chat.png)
-
-Edit your chats:
-![image Screenshot](./images/edit_group_chat.png)
-
-## Contribution Guidelines
-
-I welcome contributions! If you have ideas for improvements or new features, feel free to open an issue or submit a pull request.
-
-## License
 
 This project is licensed under the [MIT License](LICENSE).
 
